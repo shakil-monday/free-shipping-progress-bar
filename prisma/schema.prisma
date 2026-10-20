@@ -14,21 +14,44 @@ datasource db {
 }
 
 model Session {
-  id            String    @id
-  shop          String
-  state         String
-  isOnline      Boolean   @default(false)
-  scope         String?
-  expires       DateTime?
-  accessToken   String
-  userId        BigInt?
-  firstName     String?
-  lastName      String?
-  email         String?
-  accountOwner  Boolean   @default(false)
-  locale        String?
-  collaborator  Boolean?  @default(false)
-  emailVerified Boolean?  @default(false)
+  id                  String    @id
+  shop                String
+  state               String
+  isOnline            Boolean   @default(false)
+  scope               String?
+  expires             DateTime?
+  accessToken         String
+  userId              BigInt?
+  firstName           String?
+  lastName            String?
+  email               String?
+  accountOwner        Boolean   @default(false)
+  locale              String?
+  collaborator        Boolean?  @default(false)
+  emailVerified       Boolean?  @default(false)
   refreshToken        String?
   refreshTokenExpires DateTime?
+}
+
+model Settings {
+  id              String   @id @default(cuid())
+  shop            String   @unique
+  enabled         Boolean  @default(true)
+  // Threshold in the shop's base currency, in minor units (cents).
+  thresholdCents  Int      @default(5000)
+  messageEmpty    String   @default("Free shipping on orders over {threshold}")
+  messageProgress String   @default("Add {amount} more for free shipping")
+  messageSuccess  String   @default("Congrats! You've unlocked free shipping 🎉")
+  barColor        String   @default("#008060")
+  trackColor      String   @default("#e3e3e3")
+  backgroundColor String   @default("#f6f6f7")
+  textColor       String   @default("#202223")
+  fontSize        Int      @default(14)
+  borderRadius    Int      @default(8)
+  showOnCartPage  Boolean  @default(true)
+  showInDrawer    Boolean  @default(true)
+  drawerPosition  String   @default("top")
+  drawerSelector  String   @default("")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 }
