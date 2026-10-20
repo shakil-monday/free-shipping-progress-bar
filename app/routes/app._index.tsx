@@ -1,14 +1,18 @@
 import {
+  useActionData,
   useLoaderData,
+  useNavigation,
+  useSubmit,
   type ActionFunctionArgs,
   type HeadersFunction,
   type LoaderFunctionArgs,
 } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
-import { FormEvent, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import ProgressPreview, { PreviewSettings } from "app/components/ProgressPreview";
-import { getSettings } from "app/lib/settings.server";
+import { getSettings, parseSettingsForm, saveSettings } from "app/lib/settings.server";
+import { useAppBridge } from "@shopify/app-bridge-react";
 
 const EMBED_HANDLE = "app-embed";
 const BLOCK_HANDLE = "cart-progress";
@@ -21,25 +25,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     query FsbShop { shop { currencyCode } }`);
   const json = await res.json();
 
-  // const settings = {
-  //   enabled: true,
-  //   thresholdCents: 500000,
-  //   threshold: "5000",
-  //   messageEmpty: "Free shipping on orders over {threshold}",
-  //   messageProgress: "Add {amount} more for free shipping",
-  //   messageSuccess: "Congrats! You've unlocked free shipping 🎉",
-  //   barColor: "#008060",
-  //   trackColor: "#e3e3e3",
-  //   backgroundColor: "#f6f6f7",
-  //   textColor: "#202223",
-  //   fontSize: 14,
-  //   borderRadius: 8,
-  //   showOnCartPage: true,
-  //   showInDrawer: true,
-  //   drawerPosition: "top",
-  //   drawerSelector: "",
-  // }
-
   return {
     settings: settings,
     currency: (json.data?.shop?.currencyCode as String) ?? "USD",
@@ -49,9 +34,26 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  await authenticate.admin(request);
+  const { session, admin } = await authenticate.admin(request);
 
-  return null;
+  const formData = await request.formData();
+  const parsed = parseSettingsForm(formData);
+
+  console.log("formData: ", formData);
+  console.log("parsed: ", parsed);
+
+  if (!parsed.ok) return { ok: false, errors: parsed.errors as Record<string, string> }
+
+  try {
+    await saveSettings(session.shop, admin.graphql, parsed.data);
+  } catch (error) {
+    return {
+      ok: false,
+      errors: { form: error instanceof Error ? error.message : "Save failed" } as Record<string, string>
+    }
+  }
+
+  return { ok: true, errors: {} as Record<string, string> }
 };
 
 type LoaderSettings = ReturnType<typeof useLoaderData<typeof loader>>["settings"];
@@ -65,7 +67,6 @@ function readForm(form: HTMLFormElement, prev: PreviewSettings): PreviewSettings
   const fd = new FormData(form);
 
   const str = (k: keyof PreviewSettings) => String(fd.get(k) ?? prev[k]);
-  console.log("fd threshold: ", str("threshold"));
 
   return {
     ...prev,
@@ -84,26 +85,51 @@ function readForm(form: HTMLFormElement, prev: PreviewSettings): PreviewSettings
 
 export default function Index() {
   const { settings, shop, apiKey, currency } = useLoaderData<typeof loader>();
+  const actionData = useActionData<typeof action>();
   const [preview, setPreview] = useState(() => toPreview(settings));
+  const submit = useSubmit();
+  const navigation = useNavigation();
   const [previewCart, setPreviewCart] = useState(() => (settings.thresholdCents * 0.6 / 100).toFixed(2))
+  const formRef = useRef<HTMLFormElement>(null);
+  const shopify = useAppBridge();
+
+  const saving = navigation.state === "submitting";
+  const errors: Record<string, string> = actionData?.errors ?? {};
+  const err = (k: string) => (errors[k] ? { error: errors[k] } : {});
+
+  console.log("actionData.errors: ", actionData?.errors);
+
+  useEffect(() => {
+    if (!actionData) return;
+
+    if (actionData.ok) {
+      shopify.toast.show("Settings saved");
+    } else if (actionData.errors.form) {
+      shopify.toast.show(actionData.errors.form, { isError: true });
+    }
+  }, [actionData, shopify]);
+
 
   const storeHandle = shop.replace(".myshopify.com", "");
   const editorBase = `https://admin.shopify.com/store/${storeHandle}/themes/current/editor`;
   const embedLink = `${editorBase}?context=apps&activateAppId=${apiKey}/${EMBED_HANDLE}`;
   const blockLink = `${editorBase}?template=cart&addAppBlockId=${apiKey}/${BLOCK_HANDLE}&target=newAppsSection`;
 
-  var handleSubmit = (e: FormEvent<HTMLFormElement>) => {
-    var formData = new FormData(e.currentTarget);
-    var messageEmpty = formData.get("messageEmpty");
-  }
 
   return (
     <s-page heading="Free Shipping Progress Bar">
-      <s-button slot="primary-action">
+      <s-button
+        slot="primary-action"
+        variant="primary"
+        {...(saving ? { loading: true } : {})}
+        onClick={() => formRef.current?.requestSubmit()}
+      >
         Save
       </s-button>
 
       <form
+        ref={formRef}
+        id="fsb-save-bar"
         onInput={(e) => {
           const form = e.currentTarget;
           setPreview((p) => readForm(form, p));
@@ -113,8 +139,11 @@ export default function Index() {
           setPreview((p) => readForm(form, p));
         }}
         onSubmit={(e) => {
+          e.preventDefault();
           const form = e.currentTarget;
-          setPreview((p) => readForm(form, p));
+          // setPreview((p) => readForm(form, p));
+          console.log("make form submit");
+          submit(new FormData(e.currentTarget), { method: "POST" });
         }}
       >
         <s-stack direction="block" gap="base">
@@ -149,7 +178,7 @@ export default function Index() {
                 name="threshold"
                 defaultValue={(settings.thresholdCents / 100).toFixed(2)}
                 details="Set this to match your free-shipping rate. Shoppers in other currencies see it converted automatically."
-              // {...err("threshold")}
+                {...err("threshold")}
               />
             </s-stack>
           </s-section>
@@ -161,17 +190,20 @@ export default function Index() {
                 name="messageEmpty"
                 details="Use {threshold} for the threshold amount."
                 defaultValue={settings.messageEmpty}
+                {...err("messageEmpty")}
               />
               <s-text-field
                 label="In progress"
                 name="messageProgress"
                 details="Use {amount} for the remaining amount, e.g. “Add {amount} more for free shipping”."
                 defaultValue={settings.messageProgress}
+                {...err("messageProgress")}
               />
               <s-text-field
                 label="Goal reached"
                 name="messageSuccess"
                 defaultValue={settings.messageSuccess}
+                {...err("messageSuccess")}
               />
             </s-stack>
           </s-section>
@@ -183,21 +215,25 @@ export default function Index() {
                   label="Bar color"
                   name="barColor"
                   defaultValue={settings.barColor}
+                  {...err("barColor")}
                 />
                 <s-color-field
                   label="Track color"
                   name="trackColor"
                   defaultValue={settings.trackColor}
+                  {...err("trackColor")}
                 />
                 <s-color-field
                   label="Background"
                   name="backgroundColor"
                   defaultValue={settings.backgroundColor}
+                  {...err("backgroundColor")}
                 />
                 <s-color-field
                   label="Text color"
                   name="textColor"
                   defaultValue={settings.textColor}
+                  {...err("textColor")}
                 />
                 <s-number-field
                   label="Font size (px)"
@@ -205,6 +241,7 @@ export default function Index() {
                   min={10}
                   max={24}
                   defaultValue={String(settings.fontSize)}
+                  {...err("fontSize")}
                 />
                 <s-number-field
                   label="Corner radius (px)"
@@ -212,6 +249,7 @@ export default function Index() {
                   min={0}
                   max={24}
                   defaultValue={String(settings.borderRadius)}
+                  {...err("borderRadius")}
                 />
               </s-grid>
             </s-stack>
