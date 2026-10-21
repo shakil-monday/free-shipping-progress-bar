@@ -39,9 +39,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const formData = await request.formData();
   const parsed = parseSettingsForm(formData);
 
-  console.log("formData: ", formData);
-  console.log("parsed: ", parsed);
-
   if (!parsed.ok) return { ok: false, errors: parsed.errors as Record<string, string> }
 
   try {

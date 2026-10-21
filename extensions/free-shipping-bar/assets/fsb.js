@@ -15,8 +15,6 @@
         return;
     }
 
-    console.log("data: ", data)
-
     var settings = data.settings || {};
     if (!settings.enabled) return;
 
@@ -31,8 +29,17 @@
 
     const nativeFetch = window.fetch.bind(window);
 
-
-    console.log("placement: ", placement);
+    const DRAWER_SELECTORS = [
+        "cart-drawer .drawer__inner", // Dawn & most Shopify themes
+        "#CartDrawer .drawer__inner",
+        "#CartDrawer",
+        "#cart-drawer",
+        ".cart-drawer",
+        ".drawer--cart",
+        "#sidebar-cart",
+        ".mini-cart",
+    ];
+    const DRAWER_FOOTER = ".drawer__footer, .cart-drawer__footer, [class*='drawer__footer'], [class*='cart__footer']";
 
     function computeProgress(cents, thresholdCents, r) {
         var threshold = Math.round(thresholdCents * (r > 0 ? r : 1));
@@ -116,7 +123,7 @@
                     if (cart.currency) currency = cart.currency;
                     renderAll();
                 })
-                .catch(function (error) { console.log("refreshCart Error: ", error)});
+                .catch(function (error) { console.log("refreshCart Error: ", error) });
         }, 50);
     }
 
@@ -129,6 +136,40 @@
         }
     }
 
+    function findDrawer() {
+        var selectors = placement.drawerSelector ? [placement.drawerSelector] : DRAWER_SELECTORS;
+        for (var i = 0; i < selectors.length; i++) {
+            try {
+                var el = document.querySelector(selectors[i]);
+                if (el) return el;
+            } catch (e) {
+                /* invalid custom selector */
+            }
+        }
+        return null;
+    }
+
+    function ensureDrawerBar() {
+        if (!placement.drawer) return;
+        var drawer = findDrawer();
+        if (!drawer || drawer.querySelector("[data-fsb-root='drawer']")) return;
+
+        var el = document.createElement("div");
+        el.className = "fsb fsb--drawer";
+        el.setAttribute("data-fsb-root", "drawer");
+
+        if (placement.drawerPosition === "bottom") {
+            var footer = drawer.querySelector(DRAWER_FOOTER);
+            if (footer) footer.parentNode.insertBefore(el, footer);
+            else drawer.appendChild(el);
+        } else {
+            var header = drawer.querySelector(".drawer__header, [class*='drawer__header']");
+            if (header && header.parentNode === drawer) header.insertAdjacentElement("afterend", el);
+            else drawer.insertBefore(el, drawer.firstChild);
+        }
+        render(el);
+    }
+
     // Watch AJAX cart calls made by the theme or other apps.
     window.fetch = function (input, init) {
         const url = typeof input === "string" ? input : input && input.url;
@@ -139,7 +180,28 @@
         return promise;
     };
 
+    // Themes that broadcast their own cart events.
+    ["cart:updated", "cart:refresh", "cart:change", "theme:cart:change"].forEach(function (name) {
+        document.addEventListener(name, refreshCart);
+    });
+
+    // Drawers are often re-rendered (or lazily created); re-inject when needed.
+    var pending = false;
+    new MutationObserver(function () {
+        if (pending) return;
+        pending = true;
+        requestAnimationFrame(function () {
+            pending = false;
+            ensureDrawerBar();
+            var roots = document.querySelectorAll("[data-fsb-root]");
+            for (var i = 0; i < roots.length; i++) {
+                if (!roots[i].__fsbBuilt && isAllowed(roots[i])) render(roots[i]);
+            }
+        });
+    }).observe(document.body, { childList: true, subtree: true });
+
     function init() {
+        ensureDrawerBar();
         renderAll();
     }
 
@@ -148,5 +210,4 @@
     } else {
         init();
     }
-
 })()
