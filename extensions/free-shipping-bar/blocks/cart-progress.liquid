@@ -1,0 +1,11 @@
+{% render 'fsb-config' %}
+<div class="fsb" data-fsb-kh-root="cart-page" data-me-kh hidden>Hello, This is free shipping progress bar app</div>
+
+{% schema %}
+{
+  "name": "Free shipping bar",
+  "target": "section",
+  "enabled_on": { "templates": ["cart"] },
+  "settings": []
+}
+{% endschema %}

@@ -1,0 +1,13 @@
+{%- assign fsb_settings = app.metafields.fsb.settings.value -%}
+
+{%- if fsb_settings and fsb_settings.enabled -%}
+  <script type="application/json" data-fsb-config>
+    {
+        "settings": {{ fsb_settings | json }},
+        "cart": { "totalCents": {{ cart.total_price | json }}, "currency": {{ cart.currency.iso_code | json }} },
+        "locale": {{ request.locale.iso_code | json }}
+    }
+  </script>
+  {{ 'fsb.css' | asset_url | stylesheet_tag }}
+  <script src="{{ 'fsb.js' | asset_url }}" defer></script>
+{%- endif -%}
